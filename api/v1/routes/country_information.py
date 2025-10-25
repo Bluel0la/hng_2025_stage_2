@@ -1,18 +1,18 @@
-import dropbox.exceptions
 from api.utils.country_tools import refresh_countries_data, dbx, DROPBOX_ACCESS_TOKEN, DROPBOX_PATH
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import APIRouter, HTTPException, Depends, status, Query
 from api.v1.models.country_data import CountryData
-from api.db.database import get_db
+from api.db.database import get_db, get_async_db
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func
-import dropbox
+import httpx, requests, io
 
 country_ops = APIRouter(tags=["Countries"])
 
 
 @country_ops.post("/countries/refresh", status_code=status.HTTP_200_OK)
-def refresh_countries_endpoint(db: Session = Depends(get_db)):
+async def refresh_countries_endpoint(db: AsyncSession = Depends(get_async_db)):
     """
     Fetch all countries and exchange rates, then cache them in the database.
     """
@@ -78,42 +78,27 @@ def get_all_countries(
 
 @country_ops.get("/countries/image", status_code=status.HTTP_200_OK)
 def get_summary_image():
-    """
-    Redirects to the public Dropbox-hosted summary image.
-    Falls back to 404 if the object is missing.
-    """
     try:
-        # --- Check if file exists on Dropbox ---
-        try:
-            dbx.files_get_metadata(DROPBOX_PATH)
-        except dropbox.exceptions.ApiError:
-            return JSONResponse(
-                status_code=404, content={"error": "Summary image not found"}
-            )
+        dbx.files_get_metadata(DROPBOX_PATH)
+        links = dbx.sharing_list_shared_links(path=DROPBOX_PATH).links
+        if not links:
+            return JSONResponse(status_code=404, content={"error": "Image not found"})
 
-        # --- Try creating a shared link (or retrieve if it exists) ---
-        try:
-            shared_link_metadata = dbx.sharing_create_shared_link_with_settings(
-                DROPBOX_PATH
-            )
-            shared_url = shared_link_metadata.url.replace("?dl=0", "?raw=1")
-        except dropbox.exceptions.ApiError:
-            # Fallback: link may already exist
-            links = dbx.sharing_list_shared_links(path=DROPBOX_PATH).links
-            if not links:
-                return JSONResponse(
-                    status_code=404, content={"error": "Summary image not found"}
-                )
-            shared_url = links[0].url.replace("?dl=0", "?raw=1")
+        shared_url = links[0].url.replace("?dl=0", "?raw=1")
 
-        # --- Redirect to the public image ---
-        return RedirectResponse(url=shared_url)
+        # Fetch the image bytes
+        response = requests.get(shared_url)
+        if response.status_code != 200:
+            raise HTTPException(status_code=404, detail="Image not accessible")
+
+        # Stream the actual image data
+        return StreamingResponse(
+            io.BytesIO(response.content),
+            media_type="image/png",  # or "image/jpeg" depending on your file
+        )
 
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": "Unable to retrieve image", "details": str(e)},
-        )
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @country_ops.get("/countries/{name}", status_code=status.HTTP_200_OK)

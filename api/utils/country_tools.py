@@ -5,7 +5,7 @@ from fastapi import HTTPException, status
 from dotenv import load_dotenv
 from api.v1.models.system_meta import SystemMeta
 from PIL import Image, ImageDraw, ImageFont
-import random, requests, io, boto3, dropbox, os
+import random, requests, io, httpx, dropbox, os, asyncio
 from datetime import datetime
 from sqlalchemy import func
 
@@ -52,45 +52,27 @@ def fetch_exchange_rate(base_url: str, currency_code: str) -> float:
             },
         )
 
-
-def fetch_countries_data(countries_url: str, exchange_base_url: str):
-    """
-    Fetch all countries' data, attach exchange rate, and compute estimated GDP.
-    Raises HTTP 503 if either external API fails or times out.
-    """
+async def fetch_countries_data(countries_url: str, exchange_base_url: str):
     try:
-        # --- Fetch Exchange Rates ---
-        try:
-            exchange_response = requests.get(exchange_base_url, timeout=10)
-            exchange_response.raise_for_status()
-            exchange_data = exchange_response.json()
-            rates = exchange_data.get("rates", {})
-        except requests.exceptions.RequestException as e:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={
-                    "error": "External data source unavailable",
-                    "details": f"Could not fetch data from Exchange Rate API: {str(e)}",
-                },
+        async with httpx.AsyncClient(timeout=10) as client:
+            exchange_task = client.get(exchange_base_url)
+            countries_task = client.get(countries_url)
+
+            exchange_response, country_response = await asyncio.gather(
+                exchange_task, countries_task
             )
 
-        # --- Fetch Countries Data ---
-        try:
-            country_response = requests.get(countries_url, timeout=10)
-            country_response.raise_for_status()
-            countries = country_response.json()
-        except requests.exceptions.RequestException as e:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={
-                    "error": "External data source unavailable",
-                    "details": f"Could not fetch data from Countries API: {str(e)}",
-                },
-            )
+        # --- Validate and parse ---
+        exchange_response.raise_for_status()
+        country_response.raise_for_status()
 
-        # --- Enrichment ---
+        exchange_data = exchange_response.json()
+        rates = exchange_data.get("rates", {})
+        countries = country_response.json()
+
+        # Continue your enrichment logic here...
         enriched_countries = []
-
+        
         for c in countries:
             name = c.get("name")
             capital = c.get("capital")
@@ -127,19 +109,15 @@ def fetch_countries_data(countries_url: str, exchange_base_url: str):
                     "flag_url": flag_url,
                 }
             )
-
+            
         return enriched_countries
 
-    except HTTPException:
-        # Let FastAPI propagate the raised 503 error correctly
-        raise
-    except Exception as e:
-        # Unexpected error (e.g., JSON parse issue)
+    except httpx.RequestError as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
                 "error": "External data source unavailable",
-                "details": f"Unexpected error while processing data: {str(e)}",
+                "details": str(e),
             },
         )
 
