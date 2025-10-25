@@ -5,6 +5,7 @@ import random, requests, os, io, boto3
 from sqlalchemy.orm import Session
 from datetime import datetime
 from sqlalchemy import func
+from urllib.parse import unquote
 
 
 def fetch_exchange_rate(base_url: str, currency_code: str) -> float:
@@ -103,7 +104,7 @@ s3 = boto3.client(
 )
 
 BUCKET_NAME = "os-wsp1980603830540251137-vs3x-yv5n-h4cxpsz2"
-SUMMARY_KEY = "cache_summary.png"
+SUMMARY_KEY = "cache/summary.png"
 
 
 def generate_summary_image(db):
@@ -157,8 +158,8 @@ def generate_summary_image(db):
             Body=output.getvalue(),
             ContentType="image/png",
         )
-
-    return f"https://1xg7ah.leapcellobj.com/{BUCKET_NAME}/{SUMMARY_KEY}"
+    decoded_key = unquote(SUMMARY_KEY)
+    return f"https://1xg7ah.leapcellobj.com/{BUCKET_NAME}/{decoded_key}"
 
 
 def refresh_countries_data(db):
