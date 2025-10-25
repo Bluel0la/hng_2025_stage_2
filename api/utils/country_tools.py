@@ -103,7 +103,7 @@ s3 = boto3.client(
 )
 
 BUCKET_NAME = "os-wsp1980603830540251137-vs3x-yv5n-h4cxpsz2"
-SUMMARY_KEY = "cache/summary.png"
+SUMMARY_KEY = "cache_summary.png"
 
 
 def generate_summary_image(db):

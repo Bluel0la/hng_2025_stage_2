@@ -17,3 +17,6 @@ BUCKET_NAME = "os-wsp1980603830540251137-vs3x-yv5n-h4cxpsz2"
 response = s3.list_objects_v2(Bucket=BUCKET_NAME)
 for obj in response.get("Contents", []):
     print(obj["Key"])
+
+files = s3.list_objects_v2(Bucket=BUCKET_NAME)
+print([f["Key"] for f in files.get("Contents", [])])
