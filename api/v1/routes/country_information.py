@@ -69,7 +69,7 @@ def get_summary_image():
     Falls back to 404 if the object is missing.
     """
     try:
-        s3.head_object(Bucket=BUCKET_NAME, Key=SUMMARY_KEY)
+        s3.head_object(Bucket=BUCKET_NAME, Key="cache/summary.png")
         file_url = f"https://1xg7ah.leapcellobj.com/os-wsp1980603830540251137-vs3x-yv5n-h4cxpsz2/cache/summary.png"
         return RedirectResponse(url=file_url)
     except s3.exceptions.ClientError:

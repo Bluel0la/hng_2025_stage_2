@@ -1,11 +1,9 @@
 from api.v1.models.country_data import CountryData
 from api.v1.models.system_meta import SystemMeta
 from PIL import Image, ImageDraw, ImageFont
-import random, requests, os, io, boto3
-from sqlalchemy.orm import Session
+import random, requests, io, boto3
 from datetime import datetime
 from sqlalchemy import func
-from urllib.parse import unquote
 
 
 def fetch_exchange_rate(base_url: str, currency_code: str) -> float:
@@ -104,7 +102,7 @@ s3 = boto3.client(
 )
 
 BUCKET_NAME = "os-wsp1980603830540251137-vs3x-yv5n-h4cxpsz2"
-SUMMARY_KEY = "cache/summary.png"
+SUMMARY_KEY = f"cache/summary.png"
 
 
 def generate_summary_image(db):
@@ -153,12 +151,11 @@ def generate_summary_image(db):
         img.save(output, format="PNG")
         output.seek(0)
         s3.put_object(
-            Bucket=BUCKET_NAME,
+            Bucket="os-wsp1980603830540251137-vs3x-yv5n-h4cxpsz2",
             Key=SUMMARY_KEY, 
             Body=output.getvalue(),
             ContentType="image/png",
         )
-    decoded_key = unquote(SUMMARY_KEY)
     return f"https://1xg7ah.leapcellobj.com/{BUCKET_NAME}/cache/summary.png"
 
 
