@@ -1,6 +1,4 @@
-# FastAPI Boilerplate
-
-This project is a boilerplate for building APIs with FastAPI, a modern, fast (high-performance), web framework for building APIs with Python 3.7+.
+# HNG tage 2 Task
 
 ## Setup
 
