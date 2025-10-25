@@ -159,7 +159,7 @@ def generate_summary_image(db):
             ContentType="image/png",
         )
     decoded_key = unquote(SUMMARY_KEY)
-    return f"https://1xg7ah.leapcellobj.com/{BUCKET_NAME}/{decoded_key}"
+    return f"https://1xg7ah.leapcellobj.com/{BUCKET_NAME}/cache/summary.png"
 
 
 def refresh_countries_data(db):
