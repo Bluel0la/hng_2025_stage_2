@@ -118,7 +118,7 @@ def get_summary_image():
         s3.head_object(Bucket=BUCKET_NAME, Key=SUMMARY_KEY)
         # Redirect user to view the image directly
         return RedirectResponse(
-            url=f"https://1xg7ah.leapcellobj.com/{BUCKET_NAME}/cache/summary.png"
+            url=f"https://1xg7ah.leapcellobj.com/os-wsp1980603830540251137-vs3x-yv5n-h4cxpsz2/cache/summary.png"
         )
     except s3.exceptions.ClientError:
         return JSONResponse(
