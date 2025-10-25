@@ -59,23 +59,22 @@ def get_all_countries(
         "results": countries,
     }
 
+PUBLIC_BASE_URL = "https://1xg7ah.leapcellobj.com"
+
 
 @country_ops.get("/countries/image", status_code=status.HTTP_200_OK)
 def get_summary_image():
+    """
+    Redirects to the public LeapCell-hosted summary image.
+    Falls back to 404 if the object is missing.
+    """
     try:
         s3.head_object(Bucket=BUCKET_NAME, Key=SUMMARY_KEY)
-        presigned_url = s3.generate_presigned_url(
-            "get_object",
-            Params={"Bucket": BUCKET_NAME, "Key": SUMMARY_KEY},
-            ExpiresIn=3600,  # valid for 1 hour
-        )
-
-        return RedirectResponse(url=presigned_url)
-
-    except s3.exceptions.ClientError as e:
+        file_url = f"{PUBLIC_BASE_URL}/{BUCKET_NAME}/{SUMMARY_KEY}"
+        return RedirectResponse(url=file_url)
+    except s3.exceptions.ClientError:
         return JSONResponse(
-            status_code=404,
-            content={"error": "Summary image not found", "details": str(e)},
+            status_code=404, content={"error": "Summary image not found"}
         )
 
 
