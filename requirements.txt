@@ -1,3 +1,4 @@
+aiomysql==0.3.2
 aiosmtplib==2.0.2
 alembic==1.13.2
 annotated-types==0.7.0
