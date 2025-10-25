@@ -70,7 +70,7 @@ def get_summary_image():
     """
     try:
         s3.head_object(Bucket=BUCKET_NAME, Key=SUMMARY_KEY)
-        file_url = f"{PUBLIC_BASE_URL}/cache%2Fsummary.png"
+        file_url = f"{PUBLIC_BASE_URL}/cache/summary.png"
         return RedirectResponse(url=file_url)
     except s3.exceptions.ClientError:
         return JSONResponse(
