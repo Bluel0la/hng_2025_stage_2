@@ -1,10 +1,10 @@
 from api.v1.models.country_data import CountryData
 from api.v1.models.system_meta import SystemMeta
 from PIL import Image, ImageDraw, ImageFont
+import random, requests, os, io, boto3
 from sqlalchemy.orm import Session
 from datetime import datetime
 from sqlalchemy import func
-import random, requests, os
 
 
 def fetch_exchange_rate(base_url: str, currency_code: str) -> float:
@@ -91,6 +91,17 @@ def fetch_countries_data(countries_url: str, exchange_base_url: str):
         print(f"[Country Fetch Error]: {e}")
         return []
 
+s3 = boto3.client(
+    "s3",
+    region_name="us-east-1",
+    endpoint_url="https://objstorage.leapcell.io",
+    aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+    aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+)
+
+BUCKET_NAME = "os-wsp1980603830540251137-vs3x-yv5n-h4cxpsz2"
+SUMMARY_KEY = "cache/summary.png"
+
 
 def generate_summary_image(db):
     total_countries = db.query(func.count(CountryData.country_id)).scalar()
@@ -105,7 +116,7 @@ def generate_summary_image(db):
         db.query(func.max(CountryData.last_refreshed_at)).scalar() or datetime.utcnow()
     )
 
-    # Create image
+    # --- Create the image ---
     img = Image.new("RGB", (800, 500), color=(240, 240, 240))
     draw = ImageDraw.Draw(img)
 
@@ -113,7 +124,7 @@ def generate_summary_image(db):
         font_title = ImageFont.truetype("arial.ttf", 28)
         font_text = ImageFont.truetype("arial.ttf", 20)
     except:
-        font_title = font_text = None  # fallback if font missing
+        font_title = font_text = None
 
     draw.text((50, 40), "🌍 Countries Summary", fill="black", font=font_title)
     draw.text(
@@ -133,8 +144,18 @@ def generate_summary_image(db):
         font=font_text,
     )
 
-    os.makedirs("cache", exist_ok=True)
-    img.save("cache/summary.png")
+    # --- Upload to S3 instead of local storage ---
+    with io.BytesIO() as output:
+        img.save(output, format="PNG")
+        output.seek(0)
+        s3.put_object(
+            Bucket=BUCKET_NAME,
+            Key=SUMMARY_KEY,
+            Body=output,
+            ContentType="image/png",
+        )
+
+    return f"https://objstorage.leapcell.io/{BUCKET_NAME}/{SUMMARY_KEY}"
 
 
 def refresh_countries_data(db):

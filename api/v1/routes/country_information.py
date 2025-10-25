@@ -1,5 +1,5 @@
+from api.utils.country_tools import refresh_countries_data, s3, BUCKET_NAME, SUMMARY_KEY
 from fastapi import APIRouter, HTTPException, Depends, status, Query
-from api.utils.country_tools import refresh_countries_data
 from fastapi.responses import FileResponse, JSONResponse
 from api.v1.models.country_data import CountryData
 from api.db.database import get_db
@@ -109,12 +109,18 @@ def get_status(db: Session = Depends(get_db)):
         "last_refreshed_at": (last_refresh.isoformat() + "Z" if last_refresh else None),
     }
 
-@country_ops.get("/countries/image", status_code=200)
+from fastapi.responses import JSONResponse, RedirectResponse
+
+
+@country_ops.get("/countries/image", status_code=status.HTTP_200_OK)
 def get_summary_image():
-    """
-    Serve the generated summary image from cache.
-    """
-    image_path = "cache/summary.png"
-    if os.path.exists(image_path):
-        return FileResponse(image_path, media_type="image/png")
-    return JSONResponse(status_code=404, content={"error": "Summary image not found"})
+    try:
+        s3.head_object(Bucket=BUCKET_NAME, Key=SUMMARY_KEY)
+        # Redirect user to view the image directly
+        return RedirectResponse(
+            url=f"https://objstorage.leapcell.io/{BUCKET_NAME}/{SUMMARY_KEY}"
+        )
+    except s3.exceptions.ClientError:
+        return JSONResponse(
+            status_code=404, content={"error": "Summary image not found"}
+        )
