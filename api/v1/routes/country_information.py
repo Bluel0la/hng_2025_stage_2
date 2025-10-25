@@ -70,7 +70,7 @@ def get_summary_image():
     """
     try:
         s3.head_object(Bucket=BUCKET_NAME, Key=SUMMARY_KEY)
-        file_url = f"{PUBLIC_BASE_URL}/{BUCKET_NAME}/{SUMMARY_KEY}"
+        file_url = f"{PUBLIC_BASE_URL}/cache%2Fsummary.png"
         return RedirectResponse(url=file_url)
     except s3.exceptions.ClientError:
         return JSONResponse(
@@ -126,4 +126,3 @@ def get_status(db: Session = Depends(get_db)):
         "total_countries": total_countries or 0,
         "last_refreshed_at": (last_refresh.isoformat() + "Z" if last_refresh else None),
     }
-
