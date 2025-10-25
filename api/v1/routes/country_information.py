@@ -129,7 +129,18 @@ def get_country_by_name(name: str, db: Session = Depends(get_db)):
     if not country:
         raise HTTPException(status_code=404, detail=f"Country '{name}' not found.")
 
-    return country
+    return {
+        "id": country.country_id,
+        "name": country.country_name,
+        "capital": country.capital,
+        "region": country.region,
+        "population": country.population,
+        "currency_code": country.currency_code,
+        "exchange_rate": country.exchange_rate,
+        "estimated_gdp": country.estimated_gdp,
+        "flag_url": country.flag_url,
+        "last_refreshed_at": country.last_refreshed_at
+    }
 
 
 @country_ops.delete("/countries/{name}", status_code=status.HTTP_200_OK)
