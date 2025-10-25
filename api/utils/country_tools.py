@@ -110,7 +110,7 @@ def generate_summary_image(db):
     total_countries = db.query(func.count(CountryData.country_id)).scalar()
     top_countries = (
         db.query(CountryData.country_name, CountryData.estimated_gdp)
-        .filter(CountryData.estimated_gdp != None)
+        .filter(CountryData.estimated_gdp.isnot(None))
         .order_by(CountryData.estimated_gdp.desc())
         .limit(5)
         .all()
@@ -127,7 +127,7 @@ def generate_summary_image(db):
         font_title = ImageFont.truetype("arial.ttf", 28)
         font_text = ImageFont.truetype("arial.ttf", 20)
     except:
-        font_title = font_text = None
+        font_title = font_text = None  # fallback if arial not found
 
     draw.text((50, 40), "🌍 Countries Summary", fill="black", font=font_title)
     draw.text(
@@ -147,18 +147,18 @@ def generate_summary_image(db):
         font=font_text,
     )
 
-    # --- Upload to S3 instead of local storage ---
+    # --- Upload cleanly to S3 ---
     with io.BytesIO() as output:
         img.save(output, format="PNG")
         output.seek(0)
         s3.put_object(
             Bucket=BUCKET_NAME,
-            Key=SUMMARY_KEY,
-            Body=output,
+            Key=SUMMARY_KEY, 
+            Body=output.getvalue(),
             ContentType="image/png",
         )
 
-    return f"https://objstorage.leapcell.io/{BUCKET_NAME}/{SUMMARY_KEY}"
+    return f"https://1xg7ah.leapcellobj.com/{BUCKET_NAME}/{SUMMARY_KEY}"
 
 
 def refresh_countries_data(db):

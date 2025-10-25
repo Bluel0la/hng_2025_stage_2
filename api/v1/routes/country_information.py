@@ -126,3 +126,4 @@ def get_status(db: Session = Depends(get_db)):
         "total_countries": total_countries or 0,
         "last_refreshed_at": (last_refresh.isoformat() + "Z" if last_refresh else None),
     }
+
