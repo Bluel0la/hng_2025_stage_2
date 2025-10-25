@@ -59,17 +59,23 @@ def get_all_countries(
         "results": countries,
     }
 
+
 @country_ops.get("/countries/image", status_code=status.HTTP_200_OK)
 def get_summary_image():
     try:
         s3.head_object(Bucket=BUCKET_NAME, Key=SUMMARY_KEY)
-        # Redirect user to view the image directly
-        return RedirectResponse(
-            url=f"https://objstorage.leapcell.io/os-wsp1980603830540251137-vs3x-yv5n-h4cxpsz2/cache/summary.png"
+        presigned_url = s3.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": BUCKET_NAME, "Key": SUMMARY_KEY},
+            ExpiresIn=3600,  # valid for 1 hour
         )
-    except s3.exceptions.ClientError:
+
+        return RedirectResponse(url=presigned_url)
+
+    except s3.exceptions.ClientError as e:
         return JSONResponse(
-            status_code=404, content={"error": "Summary image not found"}
+            status_code=404,
+            content={"error": "Summary image not found", "details": str(e)},
         )
 
 
