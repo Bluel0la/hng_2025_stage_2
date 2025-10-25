@@ -22,7 +22,7 @@ def refresh_countries_endpoint(db: Session = Depends(get_db)):
             "total_cached": total,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 @country_ops.get("/countries", status_code=status.HTTP_200_OK)
 def get_all_countries(
