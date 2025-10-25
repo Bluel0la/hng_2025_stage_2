@@ -1,11 +1,12 @@
-from api.utils.country_tools import refresh_countries_data, s3, BUCKET_NAME, SUMMARY_KEY
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+import dropbox.exceptions
+from api.utils.country_tools import refresh_countries_data, dbx, DROPBOX_ACCESS_TOKEN, DROPBOX_PATH
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi import APIRouter, HTTPException, Depends, status, Query
 from api.v1.models.country_data import CountryData
 from api.db.database import get_db
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func
-import os
+import dropbox
 
 country_ops = APIRouter(tags=["Countries"])
 
@@ -30,8 +31,8 @@ def get_all_countries(
     currency: str | None = Query(None, description="Filter by currency code"),
     sort: str | None = Query(None, description="Sort by GDP: gdp_asc or gdp_desc"),
     db: Session = Depends(get_db),
-
 ):
+    # --- Base Query ---
     query = db.query(CountryData)
 
     # --- Filters ---
@@ -50,31 +51,68 @@ def get_all_countries(
 
     countries = query.all()
 
+    # --- Error Handling ---
     if not countries:
         raise HTTPException(
             status_code=404, detail="No countries found matching criteria."
         )
 
-    return {
-        "results": countries,
-    }
+    # --- Response Formatting ---
+    response = []
+    for country in countries:
+        response.append({
+            "id": country.country_id,
+            "name": country.country_name,
+            "capital": country.capital,
+            "region": country.region,
+            "population": country.population,
+            "currency_code": country.currency_code,
+            "exchange_rate": country.exchange_rate,
+            "estimated_gdp": country.estimated_gdp,
+            "flag_url": country.flag_url,
+            "last_refreshed_at": country.last_refreshed_at
+        })
 
-PUBLIC_BASE_URL = "https://1xg7ah.leapcellobj.com"
+    return response
 
 
 @country_ops.get("/countries/image", status_code=status.HTTP_200_OK)
 def get_summary_image():
     """
-    Redirects to the public LeapCell-hosted summary image.
+    Redirects to the public Dropbox-hosted summary image.
     Falls back to 404 if the object is missing.
     """
     try:
-        s3.head_object(Bucket=BUCKET_NAME, Key="cache/summary.png")
-        file_url = f"https://1xg7ah.leapcellobj.com/os-wsp1980603830540251137-vs3x-yv5n-h4cxpsz2/cache/summary.png"
-        return RedirectResponse(url=file_url)
-    except s3.exceptions.ClientError:
-        return JSONResponse(
-            status_code=404, content={"error": "Summary image not found"}
+        # --- Check if file exists on Dropbox ---
+        try:
+            dbx.files_get_metadata(DROPBOX_PATH)
+        except dropbox.exceptions.ApiError:
+            return JSONResponse(
+                status_code=404, content={"error": "Summary image not found"}
+            )
+
+        # --- Try creating a shared link (or retrieve if it exists) ---
+        try:
+            shared_link_metadata = dbx.sharing_create_shared_link_with_settings(
+                DROPBOX_PATH
+            )
+            shared_url = shared_link_metadata.url.replace("?dl=0", "?raw=1")
+        except dropbox.exceptions.ApiError:
+            # Fallback: link may already exist
+            links = dbx.sharing_list_shared_links(path=DROPBOX_PATH).links
+            if not links:
+                return JSONResponse(
+                    status_code=404, content={"error": "Summary image not found"}
+                )
+            shared_url = links[0].url.replace("?dl=0", "?raw=1")
+
+        # --- Redirect to the public image ---
+        return RedirectResponse(url=shared_url)
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "Unable to retrieve image", "details": str(e)},
         )
 
 
