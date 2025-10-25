@@ -1,6 +1,6 @@
 from api.utils.country_tools import refresh_countries_data, s3, BUCKET_NAME, SUMMARY_KEY
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi import APIRouter, HTTPException, Depends, status, Query
-from fastapi.responses import FileResponse, JSONResponse
 from api.v1.models.country_data import CountryData
 from api.db.database import get_db
 from sqlalchemy.orm import Session
@@ -59,6 +59,19 @@ def get_all_countries(
         "results": countries,
     }
 
+@country_ops.get("/countries/image", status_code=status.HTTP_200_OK)
+def get_summary_image():
+    try:
+        s3.head_object(Bucket=BUCKET_NAME, Key=SUMMARY_KEY)
+        # Redirect user to view the image directly
+        return RedirectResponse(
+            url=f"https://1xg7ah.leapcellobj.com/os-wsp1980603830540251137-vs3x-yv5n-h4cxpsz2/cache/summary.png"
+        )
+    except s3.exceptions.ClientError:
+        return JSONResponse(
+            status_code=404, content={"error": "Summary image not found"}
+        )
+
 
 @country_ops.get("/countries/{name}", status_code=status.HTTP_200_OK)
 def get_country_by_name(name: str, db: Session = Depends(get_db)):
@@ -108,19 +121,3 @@ def get_status(db: Session = Depends(get_db)):
         "total_countries": total_countries or 0,
         "last_refreshed_at": (last_refresh.isoformat() + "Z" if last_refresh else None),
     }
-
-from fastapi.responses import JSONResponse, RedirectResponse
-
-
-@country_ops.get("/countries/image", status_code=status.HTTP_200_OK)
-def get_summary_image():
-    try:
-        s3.head_object(Bucket=BUCKET_NAME, Key=SUMMARY_KEY)
-        # Redirect user to view the image directly
-        return RedirectResponse(
-            url=f"https://1xg7ah.leapcellobj.com/os-wsp1980603830540251137-vs3x-yv5n-h4cxpsz2/cache/summary.png"
-        )
-    except s3.exceptions.ClientError:
-        return JSONResponse(
-            status_code=404, content={"error": "Summary image not found"}
-        )
