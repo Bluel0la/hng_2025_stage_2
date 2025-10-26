@@ -7,7 +7,7 @@ from api.v1.models.system_meta import SystemMeta
 from PIL import Image, ImageDraw, ImageFont
 import random, requests, io, httpx, dropbox, os, asyncio
 from datetime import datetime
-from sqlalchemy import func
+from sqlalchemy import func, select
 from fastapi.concurrency import run_in_threadpool
 
 
@@ -163,24 +163,30 @@ async def fetch_countries_data(countries_url: str, exchange_base_url: str):
         )
 
 
-def generate_summary_image(db):
+async def generate_summary_image(db):
     """
-    Generate a visual summary of country statistics and upload to Dropbox.
+    Generate a visual summary of country statistics and upload to Dropbox (async-safe).
     """
     try:
         # --- Query Data ---
-        total_countries = db.query(func.count(CountryData.country_id)).scalar()
-        top_countries = (
-            db.query(CountryData.country_name, CountryData.estimated_gdp)
-            .filter(CountryData.estimated_gdp.isnot(None))
+        # Total countries
+        total_result = await db.execute(select(func.count(CountryData.country_id)))
+        total_countries = total_result.scalar_one_or_none() or 0
+
+        # Top 5 countries by GDP
+        top_result = await db.execute(
+            select(CountryData.country_name, CountryData.estimated_gdp)
+            .where(CountryData.estimated_gdp.isnot(None))
             .order_by(CountryData.estimated_gdp.desc())
             .limit(5)
-            .all()
         )
-        last_refresh = (
-            db.query(func.max(CountryData.last_refreshed_at)).scalar()
-            or datetime.utcnow()
+        top_countries = top_result.all()
+
+        # Last refresh timestamp
+        last_refresh_result = await db.execute(
+            select(func.max(CountryData.last_refreshed_at))
         )
+        last_refresh = last_refresh_result.scalar_one_or_none() or datetime.utcnow()
 
         # --- Create the image ---
         img = Image.new("RGB", (800, 500), color=(240, 240, 240))
@@ -189,7 +195,7 @@ def generate_summary_image(db):
         try:
             font_title = ImageFont.truetype("arial.ttf", 28)
             font_text = ImageFont.truetype("arial.ttf", 20)
-        except:
+        except Exception:
             font_title = font_text = None  # fallback if Arial is missing
 
         draw.text((50, 40), "Countries Summary", fill="black", font=font_title)
@@ -220,7 +226,7 @@ def generate_summary_image(db):
         img.save(image_bytes, format="PNG")
         image_bytes.seek(0)
 
-        # --- Upload to Dropbox ---
+        # --- Upload to Dropbox (sync I/O safe in threadpool if needed) ---
         dbx.files_upload(
             image_bytes.read(),
             DROPBOX_PATH,
@@ -235,7 +241,6 @@ def generate_summary_image(db):
             )
             shared_url = shared_link_metadata.url.replace("?dl=0", "?raw=1")
         except dropbox.exceptions.ApiError:
-            # If link already exists, retrieve it
             links = dbx.sharing_list_shared_links(path=DROPBOX_PATH).links
             if not links:
                 raise
