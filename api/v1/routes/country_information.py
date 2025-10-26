@@ -14,16 +14,27 @@ country_ops = APIRouter(tags=["Countries"])
 @country_ops.post("/countries/refresh", status_code=status.HTTP_200_OK)
 async def refresh_countries_endpoint(db: AsyncSession = Depends(get_async_db)):
     """
-    Fetch all countries and exchange rates, then cache them in the database.
+    Asynchronously fetches all countries and exchange rates, then updates or caches
+    them in the database.
     """
     try:
-        total = refresh_countries_data(db)
+        total = await refresh_countries_data(db)
         return {
             "message": "Countries data refreshed successfully.",
             "total_cached": total,
         }
+
+    except HTTPException as e:
+        # Pass through known FastAPI exceptions
+        raise e
+
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        # Handle unexpected errors gracefully
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to refresh countries data: {str(e)}",
+        )
+
 
 @country_ops.get("/countries", status_code=status.HTTP_200_OK)
 def get_all_countries(

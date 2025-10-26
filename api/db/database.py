@@ -1,18 +1,21 @@
+import os
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-import os
 
 # Load environment variables
 load_dotenv(".env.config")
 
 
+# ==========================================================
+# 1️⃣  Synchronous Engine (Optional Fallback / Migrations)
+# ==========================================================
 def get_db_engine():
     """
-    Dynamically create a SQLAlchemy engine for MySQL or SQLite (for fallback/testing).
-    Ensures optimal connection pooling and safe thread handling.
+    Create a SQLAlchemy synchronous engine for MySQL or SQLite.
+    Useful for migrations or synchronous tasks.
     """
     db_type = os.getenv("DB_TYPE", "mysql").lower()
 
@@ -33,41 +36,45 @@ def get_db_engine():
         port = os.getenv("DB_PORT", "3306")
         db_name = os.getenv("DB_NAME", "countries_db")
 
-        # Recommended MySQL URL format
         database_url = f"mysql+pymysql://{user}:{password}@{host}:{port}/{db_name}"
 
         engine = create_engine(
             database_url,
-            pool_pre_ping=True,  # Avoid stale connections
-            pool_size=10,  # Reasonable pool size
-            max_overflow=20,  # Allow limited overflow under load
-            echo=False,  # Set True for debugging SQL
+            pool_pre_ping=True,
+            pool_size=10,
+            max_overflow=20,
+            echo=False,  # set True for debugging
         )
 
     return engine
 
 
-# --- Create Engine and Session ---
 db_engine = get_db_engine()
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
+SessionLocal = sessionmaker(bind=db_engine, autocommit=False, autoflush=False)
 Base = declarative_base()
 
 
 def create_database():
-    """Initialize all tables in the database."""
+    """Initialize all tables synchronously."""
     Base.metadata.create_all(bind=db_engine)
 
 
 def get_db():
-    """Dependency to get a DB session for FastAPI routes."""
+    """Dependency to provide a synchronous DB session."""
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
 
-# --- Create async engine ---
+
+# ==========================================================
+# 2️⃣  Asynchronous Engine (Primary for FastAPI Endpoints)
+# ==========================================================
 def get_async_engine():
+    """
+    Create an asynchronous SQLAlchemy engine for MySQL using aiomysql.
+    """
     user = os.getenv("DB_USER", "root")
     password = os.getenv("DB_PASSWORD", "")
     host = os.getenv("DB_HOST", "localhost")
@@ -77,18 +84,29 @@ def get_async_engine():
     database_url = f"mysql+aiomysql://{user}:{password}@{host}:{port}/{db_name}"
 
     return create_async_engine(
-        database_url, pool_pre_ping=True, pool_size=10, max_overflow=20, echo=False
+        database_url,
+        echo=False,
+        pool_pre_ping=True,
+        pool_size=10,
+        max_overflow=20,
     )
 
 
-# --- Initialize sessionmaker ---
+# Instantiate global async engine and session factory
 async_engine = get_async_engine()
 AsyncSessionLocal = sessionmaker(
-    async_engine, class_=AsyncSession, expire_on_commit=False
+    bind=async_engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autoflush=False,
+    autocommit=False,
 )
 
 
-# --- Dependency for FastAPI ---
 async def get_async_db():
+    """
+    Dependency that yields an asynchronous database session.
+    Automatically handles cleanup and connection return to the pool.
+    """
     async with AsyncSessionLocal() as session:
         yield session

@@ -8,6 +8,8 @@ from PIL import Image, ImageDraw, ImageFont
 import random, requests, io, httpx, dropbox, os, asyncio
 from datetime import datetime
 from sqlalchemy import func
+from fastapi.concurrency import run_in_threadpool
+
 
 load_dotenv(".env.config")
 
@@ -15,15 +17,18 @@ DROPBOX_ACCESS_TOKEN = os.getenv("DROPBOX_TOKEN")
 DROPBOX_PATH = "/cache/summary.png"
 dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
 
-def fetch_exchange_rate(base_url: str, currency_code: str) -> float:
+
+async def fetch_exchange_rate(base_url: str, currency_code: str) -> float:
     """
-    Fetch exchange rate for a given currency from the external API.
-    Returns the rate as a float or raises HTTPException(503) if unavailable.
+    Asynchronously fetches the exchange rate for a given currency
+    from the external API. Returns the rate as a float or raises
+    HTTPException(503) if unavailable.
     """
     try:
-        response = requests.get(base_url, timeout=10)
-        response.raise_for_status()
-        data = response.json()
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(base_url)
+            response.raise_for_status()
+            data = response.json()
 
         rates = data.get("rates", {})
         rate = rates.get(currency_code)
@@ -33,8 +38,8 @@ def fetch_exchange_rate(base_url: str, currency_code: str) -> float:
 
         return rate
 
-    except requests.exceptions.RequestException as e:
-        # Any HTTP or timeout-related issue
+    except httpx.RequestError as e:
+        # Handles network, DNS, or connection issues
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
@@ -42,8 +47,17 @@ def fetch_exchange_rate(base_url: str, currency_code: str) -> float:
                 "details": f"Could not fetch data from Exchange Rate API: {str(e)}",
             },
         )
+    except httpx.HTTPStatusError as e:
+        # Handles non-2xx responses explicitly
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error": "Exchange Rate API returned an invalid response",
+                "details": str(e),
+            },
+        )
     except Exception as e:
-        # Catch-all for any unexpected issue
+        # General fallback for unexpected errors
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
@@ -52,9 +66,16 @@ def fetch_exchange_rate(base_url: str, currency_code: str) -> float:
             },
         )
 
+
 async def fetch_countries_data(countries_url: str, exchange_base_url: str):
+    """
+    Asynchronously fetches country data and exchange rates concurrently,
+    enriches each country with its currency exchange rate and estimated GDP.
+    Raises HTTPException(503) if any external source is unavailable.
+    """
     try:
         async with httpx.AsyncClient(timeout=10) as client:
+            # Concurrently fetch both resources
             exchange_task = client.get(exchange_base_url)
             countries_task = client.get(countries_url)
 
@@ -62,17 +83,16 @@ async def fetch_countries_data(countries_url: str, exchange_base_url: str):
                 exchange_task, countries_task
             )
 
-        # --- Validate and parse ---
-        exchange_response.raise_for_status()
-        country_response.raise_for_status()
+            # Validate HTTP responses
+            exchange_response.raise_for_status()
+            country_response.raise_for_status()
 
-        exchange_data = exchange_response.json()
-        rates = exchange_data.get("rates", {})
-        countries = country_response.json()
+            exchange_data = exchange_response.json()
+            rates = exchange_data.get("rates", {})
+            countries = country_response.json()
 
-        # Continue your enrichment logic here...
         enriched_countries = []
-        
+
         for c in countries:
             name = c.get("name")
             capital = c.get("capital")
@@ -81,21 +101,21 @@ async def fetch_countries_data(countries_url: str, exchange_base_url: str):
             flag_url = c.get("flag")
 
             currencies = c.get("currencies", [])
-            if not currencies:
-                currency_code = None
-                exchange_rate = None
-                estimated_gdp = 0
-            else:
+            currency_code = None
+            exchange_rate = None
+            estimated_gdp = None
+
+            if currencies and isinstance(currencies, list):
                 currency_code = currencies[0].get("code") if currencies[0] else None
 
-                if currency_code in rates:
+                if currency_code and currency_code in rates:
                     exchange_rate = rates[currency_code]
+                    # GDP estimation based on population and simulated factor
                     estimated_gdp = (
                         population * random.uniform(1000, 2000) / exchange_rate
                     )
                 else:
-                    exchange_rate = None
-                    estimated_gdp = None
+                    estimated_gdp = 0
 
             enriched_countries.append(
                 {
@@ -109,14 +129,35 @@ async def fetch_countries_data(countries_url: str, exchange_base_url: str):
                     "flag_url": flag_url,
                 }
             )
-            
+
         return enriched_countries
 
     except httpx.RequestError as e:
+        # Network or connection failure
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
                 "error": "External data source unavailable",
+                "details": f"Network request failed: {str(e)}",
+            },
+        )
+
+    except httpx.HTTPStatusError as e:
+        # API returned non-2xx status
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error": "Invalid response from external API",
+                "details": f"Status code: {e.response.status_code}, URL: {e.request.url}",
+            },
+        )
+
+    except Exception as e:
+        # Catch-all for any unexpected runtime issue
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error": "Data processing error",
                 "details": str(e),
             },
         )
@@ -212,83 +253,124 @@ def generate_summary_image(db):
         )
 
 
-def refresh_countries_data(db):
+async def refresh_countries_data(db):
+    """
+    Asynchronously refreshes country data and exchange rates,
+    updates the database, and regenerates summary visualization.
+    """
     countries_url = "https://restcountries.com/v2/all?fields=name,capital,region,population,flag,currencies"
     exchange_url = "https://open.er-api.com/v6/latest/USD"
 
-    # Fetch data
-    exchange_data = requests.get(exchange_url, timeout=10).json()
-    rates = exchange_data.get("rates", {})
-    country_data = requests.get(countries_url, timeout=10).json()
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            # Run both fetches concurrently
+            exchange_task = client.get(exchange_url)
+            countries_task = client.get(countries_url)
+            exchange_response, country_response = await asyncio.gather(
+                exchange_task, countries_task
+            )
 
-    cached_count = 0
-    for c in country_data:
-        name = c.get("name")
-        capital = c.get("capital")
-        region = c.get("region")
-        population = c.get("population", 0)
-        flag_url = c.get("flag")
+            exchange_response.raise_for_status()
+            country_response.raise_for_status()
 
-        currencies = c.get("currencies", [])
-        if not currencies:
+            exchange_data = exchange_response.json()
+            country_data = country_response.json()
+
+        rates = exchange_data.get("rates", {})
+        cached_count = 0
+
+        for c in country_data:
+            name = c.get("name")
+            capital = c.get("capital")
+            region = c.get("region")
+            population = c.get("population", 0)
+            flag_url = c.get("flag")
+
+            currencies = c.get("currencies", [])
             currency_code = None
             exchange_rate = None
-            estimated_gdp = 0
-        else:
-            currency_code = currencies[0].get("code")
-            if currency_code in rates:
-                exchange_rate = rates[currency_code]
-                estimated_gdp = round(
-                    population * random.uniform(1000, 2000) / exchange_rate, 1
+            estimated_gdp = None
+
+            if currencies and isinstance(currencies, list):
+                currency_code = currencies[0].get("code") if currencies[0] else None
+                if currency_code and currency_code in rates:
+                    exchange_rate = rates[currency_code]
+                    estimated_gdp = round(
+                        population * random.uniform(1000, 2000) / exchange_rate, 1
+                    )
+                else:
+                    estimated_gdp = 0
+
+            # --- Database operations (offloaded to threadpool) ---
+            async def upsert_country():
+                existing_country = (
+                    db.query(CountryData)
+                    .filter(func.lower(CountryData.country_name) == func.lower(name))
+                    .first()
                 )
-            else:
-                exchange_rate = None
-                estimated_gdp = None
 
-        # Case-insensitive match
-        existing_country = (
-            db.query(CountryData)
-            .filter(func.lower(CountryData.country_name) == func.lower(name))
-            .first()
-        )
+                if existing_country:
+                    existing_country.capital = capital
+                    existing_country.region = region
+                    existing_country.population = population
+                    existing_country.currency_code = currency_code
+                    existing_country.exchange_rate = exchange_rate
+                    existing_country.estimated_gdp = estimated_gdp
+                    existing_country.flag_url = flag_url
+                    existing_country.last_refreshed_at = datetime.utcnow()
+                else:
+                    new_country = CountryData(
+                        country_name=name,
+                        capital=capital,
+                        region=region,
+                        population=population,
+                        currency_code=currency_code,
+                        exchange_rate=exchange_rate,
+                        estimated_gdp=estimated_gdp,
+                        flag_url=flag_url,
+                    )
+                    db.add(new_country)
 
-        if existing_country:
-            existing_country.capital = capital
-            existing_country.region = region
-            existing_country.population = population
-            existing_country.currency_code = currency_code
-            existing_country.exchange_rate = exchange_rate
-            existing_country.estimated_gdp = estimated_gdp
-            existing_country.flag_url = flag_url
-            existing_country.last_refreshed_at = datetime.utcnow()
-        else:
-            new_country = CountryData(
-                country_name=name,
-                capital=capital,
-                region=region,
-                population=population,
-                currency_code=currency_code,
-                exchange_rate=exchange_rate,
-                estimated_gdp=estimated_gdp,
-                flag_url=flag_url,
+            await run_in_threadpool(upsert_country)
+            cached_count += 1
+
+        # --- Update global metadata ---
+        async def update_meta():
+            meta = (
+                db.query(SystemMeta).filter(SystemMeta.key == "global_status").first()
             )
-            db.add(new_country)
+            if not meta:
+                meta = SystemMeta(
+                    key="global_status",
+                    value="active",
+                    last_refreshed_at=datetime.utcnow(),
+                )
+                db.add(meta)
+            else:
+                meta.last_refreshed_at = datetime.utcnow()
+            db.commit()
 
-        cached_count += 1
+        await run_in_threadpool(update_meta)
 
-    # Update global timestamp
-    meta = db.query(SystemMeta).filter(SystemMeta.key == "global_status").first()
-    if not meta:
-        meta = SystemMeta(
-            key="global_status", value="active", last_refreshed_at=datetime.utcnow()
+        # --- Generate summary image (can be CPU-bound) ---
+        await run_in_threadpool(generate_summary_image, db)
+
+        return cached_count
+
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error": "External data source unavailable",
+                "details": f"Network request failed: {str(e)}",
+            },
         )
-        db.add(meta)
-    else:
-        meta.last_refreshed_at = datetime.utcnow()
 
-    db.commit()
-
-    # Generate summary image
-    generate_summary_image(db)
-
-    return cached_count
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": "Data refresh failed",
+                "details": str(e),
+            },
+        )
